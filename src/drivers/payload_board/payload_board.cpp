@@ -49,6 +49,7 @@ PayloadBoard::PayloadBoard(const char *device)
 	  ScheduledWorkItem(MODULE_NAME, px4::serial_port_to_wq(device)),
 	  _perf_cycle(perf_alloc(PC_ELAPSED, MODULE_NAME ": cycle time")),
 	  _comms_errors(perf_alloc(PC_COUNT, MODULE_NAME ": comms errors")),
+	  _input_rc_provider{nullptr},
 	  _protocol(nullptr)
 {
 	if (device) {
@@ -65,12 +66,31 @@ PayloadBoard::~PayloadBoard()
 
 int PayloadBoard::init()
 {
-	if (!_protocol) {
-		if (_param_pb_driver.get() == 0) {
-			_protocol = new payload_board::GreenTech{static_cast<uint8_t>(_param_pb_charge_time.get())};
+	constexpr uint8_t kAuxCount{6};
+	constexpr uint8_t kRcChannelsCount{16};
 
-		} else {
-			_protocol = new payload_board::SkyFall{_input_rc_sub, _vehicle_status_sub};
+	const uint8_t input_aux_index = math::min(static_cast<uint8_t>(_param_pb_in_aux.get()), kAuxCount);
+	const uint8_t output_channel_index =
+		math::max(math::min(static_cast<uint8_t>(_param_pb_out_channel.get()), kRcChannelsCount) - 1, 0);
+
+	_input_rc_provider =
+		new payload_board::RcChannelsProvider{_input_rc_sub, _manual_control_sub, input_aux_index, output_channel_index};
+
+	enum PayloadBoardType {
+		GREEN_TECH = 0,
+		SKYFALL = 1,
+	};
+
+	if (!_protocol) {
+		switch (_param_pb_driver.get()) {
+		case GREEN_TECH:
+			_protocol = new payload_board::GreenTech{static_cast<uint8_t>(_param_pb_charge_time.get())};
+			break;
+		case SKYFALL:
+			_protocol = new payload_board::SkyFall{_vehicle_status_sub, *_input_rc_provider};
+			break;
+		default:
+			break;
 		}
 
 		if (!_protocol) {
@@ -79,6 +99,7 @@ int PayloadBoard::init()
 		}
 	}
 
+	ScheduleOnInterval(20_ms);
 	_protocol->setSwapRxTx(_param_pb_swap_rx_tx.get());
 	return _protocol->init(_device);
 }
@@ -116,7 +137,6 @@ void PayloadBoard::Run()
 		}
 	}
 
-	ScheduleDelayed(25_ms);
 	perf_end(_perf_cycle);
 }
 
@@ -209,7 +229,9 @@ const char *PayloadBoard::get_state()
 }
 int PayloadBoard::print_status()
 {
-	if (_device[0]) { PX4_INFO("UART device: %s", _device); }
+	if (_device[0]) {
+		PX4_INFO("UART device: %s", _device);
+	}
 
 	PX4_INFO("State: %s", get_state());
 

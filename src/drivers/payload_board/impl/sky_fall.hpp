@@ -35,6 +35,7 @@
 #include <uORB/Subscription.hpp>
 
 #include "protocol_msp.hpp"
+#include "util/rc_channels_provider.hpp"
 
 namespace payload_board
 {
@@ -45,7 +46,7 @@ namespace payload_board
 class SkyFall final : public ProtocolMSP
 {
 public:
-	SkyFall(uORB::Subscription &input_rc_sub, uORB::Subscription &vehicle_status_sub);
+	SkyFall(uORB::Subscription &vehicle_status_sub, RcChannelsProvider &rc_channels_provider);
 	~SkyFall() override = default;
 
 protected:
@@ -59,8 +60,8 @@ private:
 	bool message_contains(const char *message) const;
 	bool message_is_blank_or_empty() const;
 
-	uORB::Subscription &_input_rc_sub;
 	uORB::Subscription &_vehicle_status_sub;
+	RcChannelsProvider &_rc_channels_provider;
 
 	uint8_t _msp_message_text[MSPMessage::kMaxPayloadLength] {};
 };

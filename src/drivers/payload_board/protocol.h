@@ -183,6 +183,10 @@ protected:
 
 	int reply() const
 	{
+		if (_transmit_length == 0) {
+			return PX4_OK;
+		}
+
 		if (_serial->write(_tx_buf, _transmit_length) < ssize_t(_transmit_length)) {
 			return -errno;
 		}

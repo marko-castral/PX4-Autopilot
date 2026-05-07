@@ -33,26 +33,26 @@
 
 #include "sky_fall.hpp"
 
-#include <cctype>
-#include <uORB/topics/input_rc.h>
 #include <uORB/topics/vehicle_status.h>
 
-#include <cstring>
+#include <cctype>
 
 namespace payload_board
 {
-SkyFall::SkyFall(uORB::Subscription &input_rc_sub, uORB::Subscription &vehicle_status_sub)
-	: _input_rc_sub{input_rc_sub}, _vehicle_status_sub{vehicle_status_sub}
-{
-}
+SkyFall::SkyFall(uORB::Subscription &vehicle_status_sub, RcChannelsProvider &rc_channels_provider)
+	: _vehicle_status_sub{vehicle_status_sub}, _rc_channels_provider{rc_channels_provider} {}
 
 int SkyFall::update_state()
 {
-	if (_msp_message.getCommand() != MSPMessage::MSP_SET_NAME) { return PX4_OK; }
+	if (_msp_message.getCommand() != MSPMessage::MSP_SET_NAME) {
+		return PX4_OK;
+	}
 
-	if (_msp_message.copyDataTo(_msp_message_text, sizeof(_msp_message_text)) == PX4_ERROR) { return PX4_ERROR; }
+	if (_msp_message.copyDataTo(_msp_message_text, sizeof(_msp_message_text)) == PX4_ERROR) {
+		return PX4_ERROR;
+	}
 
-	_msp_message_text[sizeof(_msp_message_text) - 1] = '\0'; // ensure correct string
+	_msp_message_text[sizeof(_msp_message_text) - 1] = '\0';  // ensure correct string
 
 	if (message_contains("INIC")) {
 		_last_state = payload_response_s::STATE_INACTIVE;
@@ -90,26 +90,22 @@ bool SkyFall::should_reply()
 void SkyFall::create_reply()
 {
 	memset(_tx_buf, 0, sizeof(_tx_buf));
+	_transmit_length = 0;
 
 	switch (_msp_message.getCommand()) {
 	case MSPMessage::MSP_RAW_RC: {
 			constexpr size_t kRcChannelsCount{16};
-			constexpr size_t kDataLength = kRcChannelsCount * sizeof(uint16_t);
-			static_assert(sizeof(input_rc_s::values) >= kDataLength,
-				      "input_rc_s::values array must be at least the size of 16 channels times 2 bytes");
 
-			uint8_t data[kDataLength] {};
+			uint16_t data[kRcChannelsCount] {};
+			_transmit_length = 0;
 
-			if (_input_rc_sub.updated()) {
-				input_rc_s input_rc{};
-				_input_rc_sub.copy(&input_rc);
-
-				if (!input_rc.rc_lost) { memcpy(data, input_rc.values, kDataLength); }
+			if (_rc_channels_provider.get_rc_channels(data)) {
+				const auto message = MSPMessage::response(MSPMessage::MSP_RAW_RC, reinterpret_cast<const uint8_t *>(data),
+						     kRcChannelsCount * sizeof(uint16_t));
+				message.copyTo(_tx_buf);
+				_transmit_length = message.getTotalLength();
 			}
 
-			const auto message = MSPMessage::response(MSPMessage::MSP_RAW_RC, data, kDataLength);
-			message.copyTo(_tx_buf);
-			_transmit_length = message.getTotalLength();
 			break;
 		}
 
@@ -121,7 +117,9 @@ void SkyFall::create_reply()
 			vehicle_status_s vehicle_status{};
 			_vehicle_status_sub.copy(&vehicle_status);
 
-			if (vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_ARMED) { data[6] |= 3; }
+			if (vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_ARMED) {
+				data[6] |= 3;
+			}
 
 			const auto message = MSPMessage::response(MSPMessage::MSP_STATUS, data, kDataLength);
 			message.copyTo(_tx_buf);

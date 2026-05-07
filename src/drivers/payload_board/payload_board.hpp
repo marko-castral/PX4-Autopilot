@@ -38,6 +38,7 @@
 #include <px4_platform_common/module.h>
 #include <px4_platform_common/module_params.h>
 #include <uORB/topics/input_rc.h>
+#include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/payload_response.h>
 #include <uORB/topics/vehicle_status.h>
 
@@ -45,6 +46,7 @@
 #include <uORB/PublicationMulti.hpp>
 #include <uORB/Subscription.hpp>
 
+#include "impl/util/rc_channels_provider.hpp"
 #include "protocol.h"
 
 class PayloadBoard : public ModuleBase, public ModuleParams, public px4::ScheduledWorkItem
@@ -73,19 +75,21 @@ private:
 	void Run() override;
 	const char *get_state();
 
-	DEFINE_PARAMETERS((ParamInt<px4::params::PB_DRIVER>)_param_pb_driver,
-			  (ParamInt<px4::params::PB_CHRG_TIME>)_param_pb_charge_time,
-			  (ParamInt<px4::params::PB_SER_SWP_TRX>)_param_pb_swap_rx_tx);
+	DEFINE_PARAMETERS((ParamInt<px4::params::PB_DRIVER>)_param_pb_driver, (ParamInt<px4::params::PB_CHRG_TIME>)_param_pb_charge_time,
+			  (ParamInt<px4::params::PB_SER_SWP_TRX>)_param_pb_swap_rx_tx, (ParamInt<px4::params::PB_IN_AUX>)_param_pb_in_aux,
+			  (ParamInt<px4::params::PB_OUT_CHANNEL>)_param_pb_out_channel);
 
 	perf_counter_t _perf_cycle;
 	perf_counter_t _comms_errors;
 
 	uORB::PublicationMulti<payload_response_s> _payload_response_pub{ORB_ID(payload_response)};
 	uORB::Subscription _input_rc_sub{ORB_ID(input_rc)};
+	uORB::Subscription _manual_control_sub{ORB_ID(manual_control_input)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
 
 	bool _initialized{false};
 	char _device[20] {}; ///< device / serial port path
 	payload_response_s _last_response{};
+	payload_board::RcChannelsProvider *_input_rc_provider;
 	payload_board::Protocol *_protocol;
 };
