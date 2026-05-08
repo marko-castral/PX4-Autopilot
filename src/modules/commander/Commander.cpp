@@ -2957,6 +2957,7 @@ void Commander::dataLinkCheck()
 					const bool gps_en  = nav_ctl & (1 << 0);
 					const bool agp0_en = nav_ctl & (1 << 1);
 					const bool agp1_en = nav_ctl & (1 << 2);
+					const bool agp2_en = nav_ctl & (1 << 3);
 
 					send_vehicle_command(vehicle_command_s::VEHICLE_CMD_ESTIMATOR_SENSOR_ENABLE,
 							     vehicle_command_s::FUSION_SOURCE_GPS, 0.f, gps_en ? 1.f : 0.f);
@@ -2967,7 +2968,10 @@ void Commander::dataLinkCheck()
 					send_vehicle_command(vehicle_command_s::VEHICLE_CMD_ESTIMATOR_SENSOR_ENABLE,
 							     vehicle_command_s::FUSION_SOURCE_AGP, 1.f, agp1_en ? 1.f : 0.f);
 
-					PX4_INFO("Link loss, nav source override: GPS=%d AGP0=%d AGP1=%d", gps_en, agp0_en, agp1_en);
+					send_vehicle_command(vehicle_command_s::VEHICLE_CMD_ESTIMATOR_SENSOR_ENABLE,
+							     vehicle_command_s::FUSION_SOURCE_AGP, 2.f, agp2_en ? 1.f : 0.f);
+
+					PX4_INFO("Link loss, nav source override: GPS=%d AGP0=%d AGP1=%d AGP2=%d", gps_en, agp0_en, agp1_en, agp2_en);
 				}
 			}
 		}

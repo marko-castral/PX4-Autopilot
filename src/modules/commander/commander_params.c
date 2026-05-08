@@ -1043,10 +1043,11 @@ PARAM_DEFINE_INT32(COM_MODE_ARM_CHK, 0);
  *
  * @group Commander
  * @min 0
- * @max 7
+ * @max 15
  * @bit 0 GPS
  * @bit 1 AGP0
  * @bit 2 AGP1
+ * @bit 3 AGP2
  */
 PARAM_DEFINE_INT32(COM_DLL_NAV_CTL, 0);
 
