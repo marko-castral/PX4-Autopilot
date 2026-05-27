@@ -93,7 +93,13 @@ void InternalCombustionEngineControl::Run()
 
 		// update parameters from storage
 		updateParams();
+		// Set up slew rate
 		_throttle_control_slew_rate.setSlewRate(_param_ice_thr_slew.get());
+		// Set up idle PID controller
+		_rpm_idle_pid.setSetpoint(_param_ice_idle_rpm.get());
+		_rpm_idle_pid.setGains(_param_ice_idle_rpm_p.get() * 1e-3f, _param_ice_ign_rpm_i.get() * 1e-3f, 0.f);
+		_rpm_idle_pid.setIntegralLimit(0.5f);
+		_rpm_idle_pid.setOutputLimit(0.5f);
 	}
 
 
@@ -109,6 +115,8 @@ void InternalCombustionEngineControl::Run()
 	const float throttle_in = actuator_motors.control[0];
 
 	const hrt_abstime now = hrt_absolute_time();
+
+	rpmSubUpdate(now);
 
 	switch (static_cast<ICESource>(_param_ice_on_source.get())) {
 	case ICESource::ArmingState: {
@@ -179,8 +187,9 @@ void InternalCombustionEngineControl::Run()
 				default: {
 						controlEngineStartup(now);
 
-						if (isEngineRunning(now)) {
+						if (_is_engine_running) {
 							_state = State::Running;
+							_rpm_idle_pid.resetIntegral();
 							PX4_INFO("ICE: Starting finished");
 
 						} else {
@@ -212,7 +221,7 @@ void InternalCombustionEngineControl::Run()
 				_starting_retry_cycle = 0;
 				PX4_INFO("ICE: Stopped");
 
-			} else if (!isEngineRunning(now) && _param_ice_running_fault_detection.get()) {
+			} else if (!_is_engine_running && _param_ice_running_fault_detection.get()) {
 				// without RPM feedback we assume the engine is running after the
 				// starting procedure but only switch state if fault detection is enabled
 				_state = State::Starting;
@@ -271,21 +280,28 @@ void InternalCombustionEngineControl::publishControl(const hrt_abstime now)
 	internal_combustion_engine_status_s ice_status;
 	ice_status.state = static_cast<uint8_t>(_state);
 	ice_status.timestamp = now;
+	ice_status.pid_idle_rpm_integral = _rpm_idle_pid.getIntegral();
 	_internal_combustion_engine_status_pub.publish(ice_status);
 }
 
-bool InternalCombustionEngineControl::isEngineRunning(const hrt_abstime now)
+void InternalCombustionEngineControl::rpmSubUpdate(const hrt_abstime now)
 {
 	rpm_s rpm;
 
-	if (_rpm_sub.copy(&rpm)) {
-		const hrt_abstime rpm_timestamp = rpm.timestamp;
+	if (_rpm_sub.update(&rpm)) {
+		const float dt = math::min((now - _rpm_timestamp) * 1e-6f, 1.f);
+		_rpm_timestamp = rpm.timestamp;
+		_rpm = rpm.rpm_estimate;
 
-		return (_param_ice_min_run_rpm.get() > FLT_EPSILON && (now < rpm_timestamp + 2_s)
-			&& rpm.rpm_estimate > _param_ice_min_run_rpm.get());
+		_is_engine_running =
+			(_param_ice_min_run_rpm.get() > FLT_EPSILON &&
+			 (now < _rpm_timestamp + 2_s) && _rpm > _param_ice_min_run_rpm.get());
+
+		if (_idle_control_active) {
+			_idle_throttle = _param_ice_idle_thr_ff.get() +
+					 _rpm_idle_pid.update(rpm.rpm_estimate, dt, true);
+		}
 	}
-
-	return false;
 }
 
 void InternalCombustionEngineControl::controlEngineRunning(float throttle_in)
@@ -293,8 +309,16 @@ void InternalCombustionEngineControl::controlEngineRunning(float throttle_in)
 	_ignition_on = true;
 	_choke_control = 0.f;
 	_starter_engine_control = 0.f;
-	_throttle_control = throttle_in;
 
+	if (!_idle_control_active && _rpm <= _param_ice_idle_rpm.get()) {
+		_idle_control_active = true;
+	}
+
+	if (_idle_control_active && throttle_in > _idle_throttle) {
+		_idle_control_active = false;
+	}
+
+	_throttle_control = _idle_control_active ? _idle_throttle : throttle_in;
 }
 
 void InternalCombustionEngineControl::controlEngineStop()
